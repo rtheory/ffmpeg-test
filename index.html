@@ -220,13 +220,21 @@
       background: #f9fafb;
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: 0.4rem;
     }
 
     #waveform {
       width: 100%;
       height: 96px;
       cursor: pointer;
+    }
+
+    /* Timeline row under waveform */
+    #waveTimeline {
+      width: 100%;
+      height: 18px;
+      font-size: 0.7rem;
+      color: #6b7280;
     }
 
     .wave-controls {
@@ -241,6 +249,13 @@
       color: #6b7280;
       overflow: hidden;
       text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .wave-time {
+      font-size: 0.78rem;
+      color: #4b5563;
       white-space: nowrap;
     }
 
@@ -297,12 +312,16 @@
     <!-- File list -->
     <div class="file-list" id="fileList"></div>
 
-    <!-- Waveform -->
+    <!-- Waveform + timeline + controls -->
     <div class="waveform-container">
       <div id="waveform"></div>
+      <!-- NEW: timeline below waveform -->
+      <div id="waveTimeline"></div>
       <div class="wave-controls">
         <button id="playPauseBtn" class="secondary" disabled>Play</button>
         <div class="wave-info" id="waveInfo">No file selected.</div>
+        <!-- NEW: time readout -->
+        <div class="wave-time" id="waveTime">00:00 / 00:00</div>
       </div>
     </div>
 
@@ -356,6 +375,8 @@
 
   <!-- WaveSurfer -->
   <script src="./wavesurfer.min.js"></script>
+  <!-- Timeline plugin for wavesurfer -->
+  <script src="./wavesurfer.timeline.min.js"></script>
   <!-- Self-hosted ffmpeg wrapper -->
   <script src="./ffmpeg.min.js"></script>
 
@@ -377,12 +398,21 @@
       const batchLabelEl = document.getElementById("batchLabel");
       const playPauseBtn = document.getElementById("playPauseBtn");
       const waveInfoEl = document.getElementById("waveInfo");
+      const waveTimeEl = document.getElementById("waveTime");
 
       let selectedFiles = [];
       let activeIndex = -1;
       let ffmpegLoaded = false;
       let logCapture = null;
       let currentObjectUrl = null;
+
+      // Helper: format seconds → mm:ss
+      function formatTime(seconds) {
+        if (!Number.isFinite(seconds)) seconds = 0;
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+      }
 
       // --- WaveSurfer setup ---
       const wavesurfer = WaveSurfer.create({
@@ -394,8 +424,34 @@
         responsive: true,
       });
 
+      // NEW: Timeline plugin
+      if (WaveSurfer.Timeline) {
+        wavesurfer.registerPlugin(
+          WaveSurfer.Timeline.create({
+            container: "#waveTimeline",
+            height: 18,
+            timeInterval: 1,
+            primaryLabelInterval: 5,
+            secondaryLabelInterval: 1,
+            style: {
+              fontSize: "10px",
+              color: "#6b7280",
+            },
+            formatTimeCallback: (sec) => formatTime(sec),
+          })
+        );
+      }
+
       wavesurfer.on("ready", () => {
         playPauseBtn.disabled = false;
+        const duration = wavesurfer.getDuration() || 0;
+        waveTimeEl.textContent = `00:00 / ${formatTime(duration)}`;
+      });
+
+      // Live time updates
+      wavesurfer.on("timeupdate", (currentTime) => {
+        const duration = wavesurfer.getDuration() || 0;
+        waveTimeEl.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
       });
 
       wavesurfer.on("finish", () => {
@@ -423,6 +479,7 @@
         waveInfoEl.textContent = file.name;
         playPauseBtn.textContent = "Play";
         playPauseBtn.disabled = true;
+        waveTimeEl.textContent = "00:00 / 00:00";
       }
 
       // --- FFmpeg setup ---
