@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAV to MP3 Converter (Diagnostic)</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f4f4f9; }
+        .container { text-align: center; padding: 2rem; background-color: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        #status { margin-top: 1rem; font-weight: bold; min-height: 24px; }
+        #error-log { margin-top: 1rem; color: red; font-family: monospace; max-width: 600px; text-align: left; background: #ffebeb; padding: 1rem; border-radius: 4px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WAV to MP3 Converter</h1>
+        <p>Status: <span id="status">Initializing...</span></p>
+        <pre id="error-log"></pre>
+    </div>
+
+    <!-- Using absolute path for the main script -->
+    <script src="/ffmpeg.min.js"></script>
+    <script>
+        console.log("index.html: Main page script started.");
+
+        const statusEl = document.getElementById('status');
+        const errorLogEl = document.getElementById('error-log');
+
+        if (typeof FFmpeg === 'undefined') {
+            statusEl.textContent = "Error: ffmpeg.min.js failed to load!";
+            console.error("Critical Error: The primary ffmpeg.min.js script did not load. Check its path and network status.");
+        } else {
+            console.log("index.html: FFmpeg object is defined. Attempting to create instance.");
+            const { createFFmpeg } = FFmpeg;
+           
+            // Using an absolute path for the core file
+            const corePath = '/046d0074eee1d99a674a.js';
+            console.log(`index.html: Setting corePath to: ${corePath}`);
+
+            const ffmpeg = createFFmpeg({
+                log: true,
+                corePath: corePath,
+            });
+
+            const loadFFmpeg = async () => {
+                statusEl.textContent = 'Loading FFmpeg Core...';
+                console.log("index.html: Calling ffmpeg.load()...");
+                try {
+                    await ffmpeg.load();
+                    statusEl.textContent = 'Success! FFmpeg is ready.';
+                    console.log("index.html: ffmpeg.load() completed successfully.");
+                } catch (error) {
+                    statusEl.textContent = 'Error: Failed to load FFmpeg Core.';
+                    console.error("----------- FFMPEG LOAD FAILED -----------");
+                    console.error("Error Object:", error);
+                    console.error("------------------------------------------");
+                    errorLogEl.textContent = `Error Name: ${error.name}\nError Message: ${error.message}`;
+                    errorLogEl.style.display = 'block';
+                }
+            };
+            loadFFmpeg();
+        }
+    </script>
+</body>
+</html>
