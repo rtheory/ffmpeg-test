@@ -229,7 +229,6 @@
       cursor: pointer;
     }
 
-    /* Timeline row under waveform */
     #waveTimeline {
       width: 100%;
       height: 18px;
@@ -315,12 +314,10 @@
     <!-- Waveform + timeline + controls -->
     <div class="waveform-container">
       <div id="waveform"></div>
-      <!-- NEW: timeline below waveform -->
       <div id="waveTimeline"></div>
       <div class="wave-controls">
         <button id="playPauseBtn" class="secondary" disabled>Play</button>
         <div class="wave-info" id="waveInfo">No file selected.</div>
-        <!-- NEW: time readout -->
         <div class="wave-time" id="waveTime">00:00 / 00:00</div>
       </div>
     </div>
@@ -373,10 +370,10 @@
     <pre id="error-log"></pre>
   </div>
 
-  <!-- WaveSurfer -->
+  <!-- WaveSurfer (self-hosted) -->
   <script src="./wavesurfer.min.js"></script>
-  <!-- Timeline plugin for wavesurfer -->
-  <script src="./wavesurfer.timeline.min.js"></script>
+  <!-- Timeline plugin (CDN or self-host later) -->
+  <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.min.js"></script>
   <!-- Self-hosted ffmpeg wrapper -->
   <script src="./ffmpeg.min.js"></script>
 
@@ -401,14 +398,15 @@
       const waveTimeEl = document.getElementById("waveTime");
 
       let selectedFiles = [];
+      let fileDurations = [];   // parallel array: durations in seconds
       let activeIndex = -1;
       let ffmpegLoaded = false;
-      let logCapture = null;
+      let isConverting = false;
       let currentObjectUrl = null;
 
       // Helper: format seconds → mm:ss
       function formatTime(seconds) {
-        if (!Number.isFinite(seconds)) seconds = 0;
+        if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
         const m = Math.floor(seconds / 60);
         const s = Math.floor(seconds % 60);
         return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
@@ -424,7 +422,7 @@
         responsive: true,
       });
 
-      // NEW: Timeline plugin
+      // Timeline plugin
       if (WaveSurfer.Timeline) {
         wavesurfer.registerPlugin(
           WaveSurfer.Timeline.create({
@@ -448,7 +446,6 @@
         waveTimeEl.textContent = `00:00 / ${formatTime(duration)}`;
       });
 
-      // Live time updates
       wavesurfer.on("timeupdate", (currentTime) => {
         const duration = wavesurfer.getDuration() || 0;
         waveTimeEl.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
@@ -492,12 +489,6 @@
         corePath,
       });
 
-      ffmpeg.setLogger(({ type, message }) => {
-        if (logCapture) {
-          logCapture.push(message);
-        }
-      });
-
       (async () => {
         try {
           statusEl.textContent = "Loading FFmpeg core…";
@@ -511,17 +502,46 @@
           ffmpegProgressEl.value = 0;
           ffmpegLoadLabelEl.textContent = "Error";
           statusEl.textContent = "Failed to load FFmpeg.";
-          errorLogEl.textContent = String(err);
+          errorLogEl.textContent = err instanceof Error ? err.message : JSON.stringify(err);
           errorLogEl.style.display = "block";
         }
       })();
+
+      // --- Duration with Audio() ---
+      function computeDurationForFile(file, index) {
+        const url = URL.createObjectURL(file);
+        const audio = new Audio();
+        audio.src = url;
+
+        audio.addEventListener("loadedmetadata", () => {
+          if (audio.duration && isFinite(audio.duration)) {
+            fileDurations[index] = audio.duration;
+          } else {
+            fileDurations[index] = null;
+          }
+          URL.revokeObjectURL(url);
+        });
+
+        audio.addEventListener("error", () => {
+          fileDurations[index] = null;
+          URL.revokeObjectURL(url);
+        });
+      }
 
       // --- Add files ---
       function handleFiles(files) {
         const newFiles = Array.from(files).filter(f => f.type.startsWith("audio/") || !f.type);
         if (!newFiles.length) return;
 
+        const startIdx = selectedFiles.length;
         selectedFiles = selectedFiles.concat(newFiles);
+
+        newFiles.forEach((file, offset) => {
+          const idx = startIdx + offset;
+          fileDurations[idx] = null;
+          computeDurationForFile(file, idx);
+        });
+
         renderFileList();
         if (activeIndex === -1 && selectedFiles.length > 0) {
           loadWaveformForIndex(0);
@@ -621,27 +641,7 @@
         overallProgressEl.value = processed;
       }
 
-      // --- Duration helper ---
-      async function getDurationSeconds(inputName) {
-        logCapture = [];
-        try {
-          await ffmpeg.run("-i", inputName);
-        } catch (e) {
-          // expected – we only care about logs
-        }
-        const logs = logCapture.join("\n");
-        logCapture = null;
-
-        const match = logs.match(/Duration:\s(\d+):(\d+):(\d+\.\d+)/);
-        if (!match) return null;
-
-        const hours = Number(match[1]);
-        const mins = Number(match[2]);
-        const secs = Number(match[3]);
-        return hours * 3600 + mins * 60 + secs;
-      }
-
-      // --- Single file conversion ---
+      // --- Single file conversion (no extra ffmpeg.run here) ---
       async function convertSingleFile(file, index, options) {
         const { format, trimStart, trimEnd, autoTrim } = options;
 
@@ -664,8 +664,7 @@
         args.push("-i", inputName);
 
         if (trimEnd > 0) {
-          updateFileStatus(index, "Measuring duration…");
-          const duration = await getDurationSeconds(inputName);
+          const duration = fileDurations[index];
           if (duration && duration > trimEnd) {
             const newDuration = duration - trimEnd;
             args.push("-t", String(newDuration));
@@ -714,6 +713,10 @@
           alert("Please add at least one audio file.");
           return;
         }
+        if (isConverting) {
+          // Prevent overlapping batches which trigger "only one command at a time"
+          return;
+        }
 
         const format = formatSelect.value;
         const trimStart = Number(trimStartEl.value || 0);
@@ -727,30 +730,34 @@
         const total = selectedFiles.length;
         let processed = 0;
         updateBatchProgress(0, total);
+
         convertBtn.disabled = true;
+        isConverting = true;
 
-        for (let i = 0; i < selectedFiles.length; i++) {
-          try {
-            await convertSingleFile(selectedFiles[i], i, {
-              format,
-              trimStart,
-              trimEnd,
-              autoTrim,
-            });
-            processed++;
-            updateBatchProgress(processed, total);
-            statusEl.textContent = `Converted ${processed} of ${total}.`;
-          } catch (err) {
-            updateFileStatus(i, "Error");
-            errorLogEl.textContent += `File ${selectedFiles[i].name} error:\n${String(
-              err
-            )}\n\n`;
-            errorLogEl.style.display = "block";
+        try {
+          for (let i = 0; i < selectedFiles.length; i++) {
+            try {
+              await convertSingleFile(selectedFiles[i], i, {
+                format,
+                trimStart,
+                trimEnd,
+                autoTrim,
+              });
+              processed++;
+              updateBatchProgress(processed, total);
+              statusEl.textContent = `Converted ${processed} of ${total}.`;
+            } catch (err) {
+              updateFileStatus(i, "Error");
+              const msg = err instanceof Error ? err.message : JSON.stringify(err);
+              errorLogEl.textContent += `File ${selectedFiles[i].name} error:\n${msg}\n\n`;
+              errorLogEl.style.display = "block";
+            }
           }
+          statusEl.textContent = "Batch conversion complete.";
+        } finally {
+          convertBtn.disabled = false;
+          isConverting = false;
         }
-
-        convertBtn.disabled = false;
-        statusEl.textContent = "Batch conversion complete.";
       });
     });
   </script>
