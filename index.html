@@ -641,46 +641,59 @@
         overallProgressEl.value = processed;
       }
 
-      // --- Single file conversion (no extra ffmpeg.run here) ---
+      function safeUnlink(path) {
+        try {
+            ffmpeg.FS('unlink', path);
+        } catch (e) {
+            // Ignore if it doesn't exist
+        }
+      }
+
+      // --- Single file conversion ---
       async function convertSingleFile(file, index, options) {
         const { format, trimStart, trimEnd, autoTrim } = options;
 
         const ext = file.name.includes(".")
-          ? file.name.split(".").pop()
-          : "audio";
+            ? file.name.split(".").pop()
+            : "audio";
         const baseName = file.name.replace(/\.[^/.]+$/, "");
         const inputName = `input_${index}.${ext}`;
         const outputName = `${baseName}_converted.${format}`;
 
+        // Clean up any leftovers from previous runs
+        safeUnlink(inputName);
+        safeUnlink(outputName);
+
         updateFileStatus(index, "Writing…");
         ffmpeg.FS("writeFile", inputName, await fetchFile(file));
 
-        let args = [];
+        // IMPORTANT: start args with -y to auto-overwrite existing output files
+        const args = ["-y"];
 
         if (trimStart > 0) {
-          args.push("-ss", String(trimStart));
+            args.push("-ss", String(trimStart));
         }
 
         args.push("-i", inputName);
 
         if (trimEnd > 0) {
-          const duration = fileDurations[index];
-          if (duration && duration > trimEnd) {
+            const duration = fileDurations[index];
+            if (duration && duration > trimEnd) {
             const newDuration = duration - trimEnd;
             args.push("-t", String(newDuration));
-          }
+            }
         }
 
         if (autoTrim) {
-          args.push(
+            args.push(
             "-af",
             "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB:" +
-              "end_periods=1:end_duration=0.1:end_threshold=-50dB"
-          );
+                "end_periods=1:end_duration=0.1:end_threshold=-50dB"
+            );
         }
 
         if (format === "mp3") {
-          args.push("-acodec", "libmp3lame", "-b:a", "192k");
+            args.push("-acodec", "libmp3lame", "-b:a", "192k");
         }
 
         args.push(outputName);
@@ -691,7 +704,7 @@
         updateFileStatus(index, "Reading…");
         const data = ffmpeg.FS("readFile", outputName);
         const blob = new Blob([data.buffer], {
-          type: format === "mp3" ? "audio/mpeg" : "audio/wav",
+            type: format === "mp3" ? "audio/mpeg" : "audio/wav",
         });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -700,8 +713,12 @@
         a.click();
         URL.revokeObjectURL(url);
 
+        // Optional: clean up to keep memory low
+        safeUnlink(inputName);
+        safeUnlink(outputName);
+
         updateFileStatus(index, "Done");
-      }
+        }
 
       // --- Batch conversion ---
       convertBtn.addEventListener("click", async () => {
