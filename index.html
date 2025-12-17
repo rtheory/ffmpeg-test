@@ -278,17 +278,6 @@
       display: flex;
       justify-content: space-between;
     }
-
-    .actions-row {
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .actions-row button {
-      flex: 1;
-    }
   </style>
 </head>
 <body>
@@ -298,13 +287,10 @@
       <p class="subtitle">Drop in audio files, preview the waveform, trim, and convert to WAV or MP3.</p>
     </div>
 
-    <!-- Drag & Drop + Button -->
-    <div class="actions-row">
-      <div id="dragZone" class="drag-zone">
-        <div class="drag-zone-title">Drop audio files here</div>
-        <div class="drag-zone-sub">or use the button</div>
-      </div>
-      <button id="chooseFilesBtn" class="secondary">Choose files</button>
+    <!-- Drag & Drop (clickable to open file picker) -->
+    <div id="dragZone" class="drag-zone">
+      <div class="drag-zone-title">Drop audio files here</div>
+      <div class="drag-zone-sub">or click to browse</div>
     </div>
     <input type="file" id="fileInput" accept="audio/*" multiple />
 
@@ -379,7 +365,6 @@
       const errorLogEl = document.getElementById("error-log");
       const dragZone = document.getElementById("dragZone");
       const fileInput = document.getElementById("fileInput");
-      const chooseFilesBtn = document.getElementById("chooseFilesBtn");
       const fileListEl = document.getElementById("fileList");
       const formatSelect = document.getElementById("formatSelect");
       const trimStartEl = document.getElementById("trimStart");
@@ -474,7 +459,7 @@
         }
       })();
 
-      // --- File adding ---
+      // --- Add files ---
       function handleFiles(files) {
         const newFiles = Array.from(files).filter(f => f.type.startsWith("audio/") || !f.type);
         if (!newFiles.length) return;
@@ -487,12 +472,12 @@
         updateBatchProgress(0, selectedFiles.length);
       }
 
-      // Button to open file dialog
-      chooseFilesBtn.addEventListener("click", () => {
+      // Click on drag area → open file dialog
+      dragZone.addEventListener("click", () => {
         fileInput.click();
       });
 
-      // Drag & drop
+      // Drag & drop behavior
       ["dragenter", "dragover", "dragleave", "drop"].forEach(eventName => {
         dragZone.addEventListener(eventName, e => {
           e.preventDefault();
@@ -585,7 +570,7 @@
         try {
           await ffmpeg.run("-i", inputName);
         } catch (e) {
-          // expected error; we just need logs
+          // expected – we only care about logs
         }
         const logs = logCapture.join("\n");
         logCapture = null;
