@@ -307,6 +307,15 @@
     <!-- FILE LIST -->
     <div class="file-list" id="fileList"></div>
 
+    <!-- WAVEFORM PREVIEW (NOW IN SAME COLUMN) -->
+    <div class="waveform-container">
+      <div id="waveform"></div>
+      <div class="wave-controls">
+        <button id="playPauseBtn" class="secondary" disabled>Play</button>
+        <div class="wave-info" id="waveInfo">No file selected.</div>
+      </div>
+    </div>
+
     <!-- OPTIONS -->
     <div>
       <label>Convert to format</label>
@@ -355,19 +364,10 @@
     <div id="status">Initializing FFmpeg…</div>
     <pre id="error-log"></pre>
 
-    <!-- WAVEFORM PREVIEW (NOW IN SAME COLUMN) -->
-    <div class="waveform-container">
-      <div id="waveform"></div>
-      <div class="wave-controls">
-        <button id="playPauseBtn" class="secondary" disabled>Play</button>
-        <div class="wave-info" id="waveInfo">No file selected.</div>
-      </div>
-    </div>
-
   </div>
 
   <!-- SCRIPTS (unchanged) -->
-  <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+  <script src="./wavesurfer.min.js"></script>
   <script src="./ffmpeg.min.js"></script>
   <script>
     /* Keep your entire script block exactly as-is — no changes needed */
