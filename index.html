@@ -229,6 +229,7 @@
       cursor: pointer;
     }
 
+    /* Timeline row under waveform */
     #waveTimeline {
       width: 100%;
       height: 18px;
@@ -314,10 +315,12 @@
     <!-- Waveform + timeline + controls -->
     <div class="waveform-container">
       <div id="waveform"></div>
+      <!-- NEW: timeline below waveform -->
       <div id="waveTimeline"></div>
       <div class="wave-controls">
         <button id="playPauseBtn" class="secondary" disabled>Play</button>
         <div class="wave-info" id="waveInfo">No file selected.</div>
+        <!-- NEW: time readout -->
         <div class="wave-time" id="waveTime">00:00 / 00:00</div>
       </div>
     </div>
@@ -370,10 +373,10 @@
     <pre id="error-log"></pre>
   </div>
 
-  <!-- WaveSurfer (self-hosted) -->
+  <!-- WaveSurfer -->
   <script src="./wavesurfer.min.js"></script>
-  <!-- Timeline plugin (CDN or self-host later) -->
-  <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.min.js"></script>
+  <!-- Timeline plugin for wavesurfer -->
+  <script src="./wavesurfer.timeline.min.js"></script>
   <!-- Self-hosted ffmpeg wrapper -->
   <script src="./ffmpeg.min.js"></script>
 
@@ -398,15 +401,14 @@
       const waveTimeEl = document.getElementById("waveTime");
 
       let selectedFiles = [];
-      let fileDurations = [];   // parallel array: durations in seconds
       let activeIndex = -1;
       let ffmpegLoaded = false;
-      let isConverting = false;
+      let logCapture = null;
       let currentObjectUrl = null;
 
       // Helper: format seconds → mm:ss
       function formatTime(seconds) {
-        if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+        if (!Number.isFinite(seconds)) seconds = 0;
         const m = Math.floor(seconds / 60);
         const s = Math.floor(seconds % 60);
         return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
@@ -422,7 +424,7 @@
         responsive: true,
       });
 
-      // Timeline plugin
+      // NEW: Timeline plugin
       if (WaveSurfer.Timeline) {
         wavesurfer.registerPlugin(
           WaveSurfer.Timeline.create({
@@ -446,6 +448,7 @@
         waveTimeEl.textContent = `00:00 / ${formatTime(duration)}`;
       });
 
+      // Live time updates
       wavesurfer.on("timeupdate", (currentTime) => {
         const duration = wavesurfer.getDuration() || 0;
         waveTimeEl.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
@@ -489,6 +492,12 @@
         corePath,
       });
 
+      ffmpeg.setLogger(({ type, message }) => {
+        if (logCapture) {
+          logCapture.push(message);
+        }
+      });
+
       (async () => {
         try {
           statusEl.textContent = "Loading FFmpeg core…";
@@ -502,46 +511,17 @@
           ffmpegProgressEl.value = 0;
           ffmpegLoadLabelEl.textContent = "Error";
           statusEl.textContent = "Failed to load FFmpeg.";
-          errorLogEl.textContent = err instanceof Error ? err.message : JSON.stringify(err);
+          errorLogEl.textContent = String(err);
           errorLogEl.style.display = "block";
         }
       })();
-
-      // --- Duration with Audio() ---
-      function computeDurationForFile(file, index) {
-        const url = URL.createObjectURL(file);
-        const audio = new Audio();
-        audio.src = url;
-
-        audio.addEventListener("loadedmetadata", () => {
-          if (audio.duration && isFinite(audio.duration)) {
-            fileDurations[index] = audio.duration;
-          } else {
-            fileDurations[index] = null;
-          }
-          URL.revokeObjectURL(url);
-        });
-
-        audio.addEventListener("error", () => {
-          fileDurations[index] = null;
-          URL.revokeObjectURL(url);
-        });
-      }
 
       // --- Add files ---
       function handleFiles(files) {
         const newFiles = Array.from(files).filter(f => f.type.startsWith("audio/") || !f.type);
         if (!newFiles.length) return;
 
-        const startIdx = selectedFiles.length;
         selectedFiles = selectedFiles.concat(newFiles);
-
-        newFiles.forEach((file, offset) => {
-          const idx = startIdx + offset;
-          fileDurations[idx] = null;
-          computeDurationForFile(file, idx);
-        });
-
         renderFileList();
         if (activeIndex === -1 && selectedFiles.length > 0) {
           loadWaveformForIndex(0);
@@ -641,12 +621,24 @@
         overallProgressEl.value = processed;
       }
 
-      function safeUnlink(path) {
+      // --- Duration helper ---
+      async function getDurationSeconds(inputName) {
+        logCapture = [];
         try {
-            ffmpeg.FS('unlink', path);
+          await ffmpeg.run("-i", inputName);
         } catch (e) {
-            // Ignore if it doesn't exist
+          // expected – we only care about logs
         }
+        const logs = logCapture.join("\n");
+        logCapture = null;
+
+        const match = logs.match(/Duration:\s(\d+):(\d+):(\d+\.\d+)/);
+        if (!match) return null;
+
+        const hours = Number(match[1]);
+        const mins = Number(match[2]);
+        const secs = Number(match[3]);
+        return hours * 3600 + mins * 60 + secs;
       }
 
       // --- Single file conversion ---
@@ -654,46 +646,42 @@
         const { format, trimStart, trimEnd, autoTrim } = options;
 
         const ext = file.name.includes(".")
-            ? file.name.split(".").pop()
-            : "audio";
+          ? file.name.split(".").pop()
+          : "audio";
         const baseName = file.name.replace(/\.[^/.]+$/, "");
         const inputName = `input_${index}.${ext}`;
         const outputName = `${baseName}_converted.${format}`;
 
-        // Clean up any leftovers from previous runs
-        safeUnlink(inputName);
-        safeUnlink(outputName);
-
         updateFileStatus(index, "Writing…");
         ffmpeg.FS("writeFile", inputName, await fetchFile(file));
 
-        // IMPORTANT: start args with -y to auto-overwrite existing output files
-        const args = ["-y"];
+        let args = [];
 
         if (trimStart > 0) {
-            args.push("-ss", String(trimStart));
+          args.push("-ss", String(trimStart));
         }
 
         args.push("-i", inputName);
 
         if (trimEnd > 0) {
-            const duration = fileDurations[index];
-            if (duration && duration > trimEnd) {
+          updateFileStatus(index, "Measuring duration…");
+          const duration = await getDurationSeconds(inputName);
+          if (duration && duration > trimEnd) {
             const newDuration = duration - trimEnd;
             args.push("-t", String(newDuration));
-            }
+          }
         }
 
         if (autoTrim) {
-            args.push(
+          args.push(
             "-af",
             "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB:" +
-                "end_periods=1:end_duration=0.1:end_threshold=-50dB"
-            );
+              "end_periods=1:end_duration=0.1:end_threshold=-50dB"
+          );
         }
 
         if (format === "mp3") {
-            args.push("-acodec", "libmp3lame", "-b:a", "192k");
+          args.push("-acodec", "libmp3lame", "-b:a", "192k");
         }
 
         args.push(outputName);
@@ -704,7 +692,7 @@
         updateFileStatus(index, "Reading…");
         const data = ffmpeg.FS("readFile", outputName);
         const blob = new Blob([data.buffer], {
-            type: format === "mp3" ? "audio/mpeg" : "audio/wav",
+          type: format === "mp3" ? "audio/mpeg" : "audio/wav",
         });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -713,12 +701,8 @@
         a.click();
         URL.revokeObjectURL(url);
 
-        // Optional: clean up to keep memory low
-        safeUnlink(inputName);
-        safeUnlink(outputName);
-
         updateFileStatus(index, "Done");
-        }
+      }
 
       // --- Batch conversion ---
       convertBtn.addEventListener("click", async () => {
@@ -728,10 +712,6 @@
         }
         if (!selectedFiles.length) {
           alert("Please add at least one audio file.");
-          return;
-        }
-        if (isConverting) {
-          // Prevent overlapping batches which trigger "only one command at a time"
           return;
         }
 
@@ -747,34 +727,30 @@
         const total = selectedFiles.length;
         let processed = 0;
         updateBatchProgress(0, total);
-
         convertBtn.disabled = true;
-        isConverting = true;
 
-        try {
-          for (let i = 0; i < selectedFiles.length; i++) {
-            try {
-              await convertSingleFile(selectedFiles[i], i, {
-                format,
-                trimStart,
-                trimEnd,
-                autoTrim,
-              });
-              processed++;
-              updateBatchProgress(processed, total);
-              statusEl.textContent = `Converted ${processed} of ${total}.`;
-            } catch (err) {
-              updateFileStatus(i, "Error");
-              const msg = err instanceof Error ? err.message : JSON.stringify(err);
-              errorLogEl.textContent += `File ${selectedFiles[i].name} error:\n${msg}\n\n`;
-              errorLogEl.style.display = "block";
-            }
+        for (let i = 0; i < selectedFiles.length; i++) {
+          try {
+            await convertSingleFile(selectedFiles[i], i, {
+              format,
+              trimStart,
+              trimEnd,
+              autoTrim,
+            });
+            processed++;
+            updateBatchProgress(processed, total);
+            statusEl.textContent = `Converted ${processed} of ${total}.`;
+          } catch (err) {
+            updateFileStatus(i, "Error");
+            errorLogEl.textContent += `File ${selectedFiles[i].name} error:\n${String(
+              err
+            )}\n\n`;
+            errorLogEl.style.display = "block";
           }
-          statusEl.textContent = "Batch conversion complete.";
-        } finally {
-          convertBtn.disabled = false;
-          isConverting = false;
         }
+
+        convertBtn.disabled = false;
+        statusEl.textContent = "Batch conversion complete.";
       });
     });
   </script>
