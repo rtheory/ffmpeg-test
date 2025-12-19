@@ -229,7 +229,6 @@
       cursor: pointer;
     }
 
-    /* Timeline row under waveform */
     #waveTimeline {
       width: 100%;
       height: 18px;
@@ -302,20 +301,16 @@
       <p class="subtitle">Drop in audio files, preview the waveform, trim, and convert to WAV or MP3.</p>
     </div>
 
-    <!-- Drag & Drop (clickable to open file picker) -->
     <div id="dragZone" class="drag-zone">
       <div class="drag-zone-title">Drop audio files here</div>
       <div class="drag-zone-sub">or click to browse</div>
     </div>
     <input type="file" id="fileInput" accept="audio/*" multiple />
 
-    <!-- File list -->
     <div class="file-list" id="fileList"></div>
 
-    <!-- Waveform + timeline + controls -->
     <div class="waveform-container">
       <div id="waveform"></div>
-      <!-- Timeline below waveform -->
       <div id="waveTimeline"></div>
       <div class="wave-controls">
         <button id="playPauseBtn" class="secondary" disabled>Play</button>
@@ -324,7 +319,6 @@
       </div>
     </div>
 
-    <!-- Options -->
     <div>
       <label>Convert to format</label>
       <select id="formatSelect">
@@ -351,7 +345,6 @@
 
     <button id="convertBtn">Convert all files</button>
 
-    <!-- Progress -->
     <div class="progress-row">
       <div class="progress-label">
         <span>FFmpeg Core</span>
@@ -372,11 +365,8 @@
     <pre id="error-log"></pre>
   </div>
 
-  <!-- WaveSurfer -->
   <script src="./wavesurfer.min.js"></script>
-  <!-- Timeline plugin for wavesurfer -->
   <script src="./wavesurfer.timeline.min.js"></script>
-  <!-- Self-hosted ffmpeg wrapper -->
   <script src="./ffmpeg.min.js"></script>
 
   <script>
@@ -402,11 +392,9 @@
       let selectedFiles = [];
       let activeIndex = -1;
       let ffmpegLoaded = false;
-      let logCapture = null;
       let currentObjectUrl = null;
       let isConverting = false;
 
-      // Helper: format seconds → mm:ss
       function formatTime(seconds) {
         if (!Number.isFinite(seconds)) seconds = 0;
         const m = Math.floor(seconds / 60);
@@ -414,7 +402,7 @@
         return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
       }
 
-      // --- WaveSurfer setup ---
+      // WaveSurfer setup
       const wavesurfer = WaveSurfer.create({
         container: "#waveform",
         waveColor: "#cbd5f5",
@@ -424,7 +412,6 @@
         responsive: true,
       });
 
-      // Timeline plugin
       if (WaveSurfer.Timeline) {
         wavesurfer.registerPlugin(
           WaveSurfer.Timeline.create({
@@ -433,10 +420,7 @@
             timeInterval: 1,
             primaryLabelInterval: 5,
             secondaryLabelInterval: 1,
-            style: {
-              fontSize: "10px",
-              color: "#6b7280",
-            },
+            style: { fontSize: "10px", color: "#6b7280" },
             formatTimeCallback: (sec) => formatTime(sec),
           })
         );
@@ -448,7 +432,6 @@
         waveTimeEl.textContent = `00:00 / ${formatTime(duration)}`;
       });
 
-      // Live time updates
       wavesurfer.on("timeupdate", (currentTime) => {
         const duration = wavesurfer.getDuration() || 0;
         waveTimeEl.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
@@ -482,27 +465,21 @@
         waveTimeEl.textContent = "00:00 / 00:00";
       }
 
-      // --- FFmpeg setup ---
+      // FFmpeg setup
       const { createFFmpeg, fetchFile } = FFmpeg;
       const corePath = new URL("./ffmpeg-core.js", window.location.href).href;
 
       const ffmpeg = createFFmpeg({
-        log: true,
+        log: false,
         mainName: "main",
         corePath,
       });
 
-      ffmpeg.setLogger(({ type, message }) => {
-        if (logCapture) {
-          logCapture.push(message);
-        }
-      });
-
-      // Wrapper to treat ExitStatus status 0 as success
       async function runFFmpegSafe(...args) {
         try {
           return await ffmpeg.run(...args);
         } catch (err) {
+          // Some builds throw ExitStatus(0) – treat that as success
           if (err && err.name === "ExitStatus" && (err.status === 0 || err.status === "0")) {
             console.warn("FFmpeg exited with status 0 but threw ExitStatus – treating as success.", err);
             return;
@@ -529,7 +506,39 @@
         }
       })();
 
-      // --- Add files ---
+      // Duration via browser Audio (no extra ffmpeg commands)
+      function getDurationSecondsFromFile(file) {
+        return new Promise((resolve) => {
+          const url = URL.createObjectURL(file);
+          const audio = new Audio();
+          audio.preload = "metadata";
+
+          const cleanup = () => {
+            URL.revokeObjectURL(url);
+            audio.removeAttribute("src");
+            audio.load();
+          };
+
+          audio.addEventListener("loadedmetadata", () => {
+            const duration = audio.duration;
+            cleanup();
+            if (!Number.isFinite(duration) || duration <= 0) {
+              resolve(null);
+            } else {
+              resolve(duration);
+            }
+          });
+
+          audio.addEventListener("error", () => {
+            cleanup();
+            resolve(null);
+          });
+
+          audio.src = url;
+        });
+      }
+
+      // File handling
       function handleFiles(files) {
         const newFiles = Array.from(files).filter(f => f.type.startsWith("audio/") || !f.type);
         if (!newFiles.length) return;
@@ -542,12 +551,8 @@
         updateBatchProgress(0, selectedFiles.length);
       }
 
-      // Click on drag area → open file dialog
-      dragZone.addEventListener("click", () => {
-        fileInput.click();
-      });
+      dragZone.addEventListener("click", () => fileInput.click());
 
-      // Drag & drop behavior
       ["dragenter", "dragover", "dragleave", "drop"].forEach(eventName => {
         dragZone.addEventListener(eventName, e => {
           e.preventDefault();
@@ -555,13 +560,8 @@
         });
       });
 
-      dragZone.addEventListener("dragover", () => {
-        dragZone.classList.add("dragover");
-      });
-
-      dragZone.addEventListener("dragleave", () => {
-        dragZone.classList.remove("dragover");
-      });
+      dragZone.addEventListener("dragover", () => dragZone.classList.add("dragover"));
+      dragZone.addEventListener("dragleave", () => dragZone.classList.remove("dragover"));
 
       dragZone.addEventListener("drop", e => {
         dragZone.classList.remove("dragover");
@@ -570,7 +570,6 @@
         }
       });
 
-      // File input change
       fileInput.addEventListener("change", e => {
         if (e.target.files) {
           handleFiles(e.target.files);
@@ -578,7 +577,7 @@
         fileInput.value = "";
       });
 
-      // --- File list UI ---
+      // File list UI
       function renderFileList() {
         fileListEl.innerHTML = "";
         if (!selectedFiles.length) {
@@ -603,9 +602,7 @@
           item.appendChild(nameSpan);
           item.appendChild(statusSpan);
 
-          item.addEventListener("click", () => {
-            loadWaveformForIndex(idx);
-          });
+          item.addEventListener("click", () => loadWaveformForIndex(idx));
 
           fileListEl.appendChild(item);
         });
@@ -620,11 +617,8 @@
         Array.from(fileListEl.children).forEach(child => {
           if (!child.classList.contains("file-item")) return;
           const idx = Number(child.dataset.index);
-          if (idx === activeIndex) {
-            child.classList.add("active");
-          } else {
-            child.classList.remove("active");
-          }
+          if (idx === activeIndex) child.classList.add("active");
+          else child.classList.remove("active");
         });
       }
 
@@ -634,28 +628,7 @@
         overallProgressEl.value = processed;
       }
 
-      // --- Duration helper ---
-      async function getDurationSeconds(inputName) {
-        logCapture = [];
-        try {
-          // This will likely error due to no output, but we just want the metadata in logs
-          await runFFmpegSafe("-i", inputName);
-        } catch (e) {
-          // Non-zero ExitStatus is fine here; we only care about whatever was printed
-        }
-        const logs = logCapture.join("\n");
-        logCapture = null;
-
-        const match = logs.match(/Duration:\s(\d+):(\d+):(\d+\.\d+)/);
-        if (!match) return null;
-
-        const hours = Number(match[1]);
-        const mins = Number(match[2]);
-        const secs = Number(match[3]);
-        return hours * 3600 + mins * 60 + secs;
-      }
-
-      // --- Single file conversion ---
+      // Single file conversion
       async function convertSingleFile(file, index, options) {
         const { format, trimStart, trimEnd, autoTrim } = options;
 
@@ -667,15 +640,14 @@
         const outputName = `${baseName}_converted.${format}`;
 
         try {
-          // Clean up any leftover files from previous runs
+          // Clean up previous runs
           try { ffmpeg.FS("unlink", inputName); } catch (e) {}
           try { ffmpeg.FS("unlink", outputName); } catch (e) {}
 
           updateFileStatus(index, "Writing…");
           ffmpeg.FS("writeFile", inputName, await fetchFile(file));
 
-          // Always overwrite without prompt
-          let args = ["-y"];
+          let args = ["-y"]; // overwrite output
 
           if (trimStart > 0) {
             args.push("-ss", String(trimStart));
@@ -685,7 +657,7 @@
 
           if (trimEnd > 0) {
             updateFileStatus(index, "Measuring duration…");
-            const duration = await getDurationSeconds(inputName);
+            const duration = await getDurationSecondsFromFile(file);
             if (duration && duration > trimEnd) {
               const newDuration = duration - trimEnd;
               args.push("-t", String(newDuration));
@@ -731,13 +703,12 @@
           errorLogEl.style.display = "block";
           throw err;
         } finally {
-          // Cleanup FS to keep memory under control
           try { ffmpeg.FS("unlink", inputName); } catch (e) {}
           try { ffmpeg.FS("unlink", outputName); } catch (e) {}
         }
       }
 
-      // --- Batch conversion ---
+      // Batch conversion
       convertBtn.addEventListener("click", async () => {
         if (isConverting) {
           alert("Conversion is already running.");
@@ -781,7 +752,7 @@
               updateBatchProgress(processed, total);
               statusEl.textContent = `Converted ${processed} of ${total}.`;
             } catch (err) {
-              // per-file error already logged; continue to next file
+              // error already logged per file
             }
           }
 
