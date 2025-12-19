@@ -315,12 +315,11 @@
     <!-- Waveform + timeline + controls -->
     <div class="waveform-container">
       <div id="waveform"></div>
-      <!-- NEW: timeline below waveform -->
+      <!-- Timeline below waveform -->
       <div id="waveTimeline"></div>
       <div class="wave-controls">
         <button id="playPauseBtn" class="secondary" disabled>Play</button>
         <div class="wave-info" id="waveInfo">No file selected.</div>
-        <!-- NEW: time readout -->
         <div class="wave-time" id="waveTime">00:00 / 00:00</div>
       </div>
     </div>
@@ -405,6 +404,7 @@
       let ffmpegLoaded = false;
       let logCapture = null;
       let currentObjectUrl = null;
+      let isConverting = false;
 
       // Helper: format seconds → mm:ss
       function formatTime(seconds) {
@@ -424,7 +424,7 @@
         responsive: true,
       });
 
-      // NEW: Timeline plugin
+      // Timeline plugin
       if (WaveSurfer.Timeline) {
         wavesurfer.registerPlugin(
           WaveSurfer.Timeline.create({
@@ -497,6 +497,19 @@
           logCapture.push(message);
         }
       });
+
+      // Wrapper to treat ExitStatus status 0 as success
+      async function runFFmpegSafe(...args) {
+        try {
+          return await ffmpeg.run(...args);
+        } catch (err) {
+          if (err && err.name === "ExitStatus" && (err.status === 0 || err.status === "0")) {
+            console.warn("FFmpeg exited with status 0 but threw ExitStatus – treating as success.", err);
+            return;
+          }
+          throw err;
+        }
+      }
 
       (async () => {
         try {
@@ -625,9 +638,10 @@
       async function getDurationSeconds(inputName) {
         logCapture = [];
         try {
-          await ffmpeg.run("-i", inputName);
+          // This will likely error due to no output, but we just want the metadata in logs
+          await runFFmpegSafe("-i", inputName);
         } catch (e) {
-          // expected – we only care about logs
+          // Non-zero ExitStatus is fine here; we only care about whatever was printed
         }
         const logs = logCapture.join("\n");
         logCapture = null;
@@ -653,14 +667,14 @@
         const outputName = `${baseName}_converted.${format}`;
 
         try {
-          // Clean up any leftover files from a previous run
+          // Clean up any leftover files from previous runs
           try { ffmpeg.FS("unlink", inputName); } catch (e) {}
           try { ffmpeg.FS("unlink", outputName); } catch (e) {}
 
           updateFileStatus(index, "Writing…");
           ffmpeg.FS("writeFile", inputName, await fetchFile(file));
 
-          // Start args with -y so FFmpeg overwrites output files without prompting
+          // Always overwrite without prompt
           let args = ["-y"];
 
           if (trimStart > 0) {
@@ -682,7 +696,7 @@
             args.push(
               "-af",
               "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB:" +
-                "end_periods=1:end_duration=0.1:end_threshold=-50dB"
+              "end_periods=1:end_duration=0.1:end_threshold=-50dB"
             );
           }
 
@@ -693,7 +707,7 @@
           args.push(outputName);
 
           updateFileStatus(index, "Converting…");
-          await ffmpeg.run(...args);
+          await runFFmpegSafe(...args);
 
           updateFileStatus(index, "Reading…");
           const data = ffmpeg.FS("readFile", outputName);
@@ -709,7 +723,6 @@
 
           updateFileStatus(index, "Done");
         } catch (err) {
-          // More helpful error logging
           console.error("FFmpeg error for file", file.name, err);
           updateFileStatus(index, "Error");
           errorLogEl.textContent += `File ${file.name} error:\n${
@@ -725,8 +738,6 @@
       }
 
       // --- Batch conversion ---
-      let isConverting = false;
-      
       convertBtn.addEventListener("click", async () => {
         if (isConverting) {
           alert("Conversion is already running.");
@@ -741,23 +752,23 @@
           return;
         }
 
-        isConverting = true;
+        const format = formatSelect.value;
+        const trimStart = Number(trimStartEl.value || 0);
+        const trimEnd = Number(trimEndEl.value || 0);
+        const autoTrim = autoTrimEl.checked;
+
+        statusEl.textContent = "Starting batch conversion…";
+        errorLogEl.style.display = "none";
+        errorLogEl.textContent = "";
+
+        const total = selectedFiles.length;
+        let processed = 0;
+        updateBatchProgress(0, total);
+
         convertBtn.disabled = true;
+        isConverting = true;
 
         try {
-          const format = formatSelect.value;
-          const trimStart = Number(trimStartEl.value || 0);
-          const trimEnd = Number(trimEndEl.value || 0);
-          const autoTrim = autoTrimEl.checked;
-
-          statusEl.textContent = "Starting batch conversion…";
-          errorLogEl.style.display = "none";
-          errorLogEl.textContent = "";
-
-          const total = selectedFiles.length;
-          let processed = 0;
-          updateBatchProgress(0, total);
-
           for (let i = 0; i < selectedFiles.length; i++) {
             try {
               await convertSingleFile(selectedFiles[i], i, {
@@ -770,14 +781,14 @@
               updateBatchProgress(processed, total);
               statusEl.textContent = `Converted ${processed} of ${total}.`;
             } catch (err) {
-              // already logged per-file, continue with next file
+              // per-file error already logged; continue to next file
             }
           }
 
           statusEl.textContent = "Batch conversion complete.";
         } finally {
-          isConverting = false;
           convertBtn.disabled = false;
+          isConverting = false;
         }
       });
     });
