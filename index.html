@@ -652,60 +652,86 @@
         const inputName = `input_${index}.${ext}`;
         const outputName = `${baseName}_converted.${format}`;
 
-        updateFileStatus(index, "Writing…");
-        ffmpeg.FS("writeFile", inputName, await fetchFile(file));
+        try {
+          // Clean up any leftover files from a previous run
+          try { ffmpeg.FS("unlink", inputName); } catch (e) {}
+          try { ffmpeg.FS("unlink", outputName); } catch (e) {}
 
-        let args = [];
+          updateFileStatus(index, "Writing…");
+          ffmpeg.FS("writeFile", inputName, await fetchFile(file));
 
-        if (trimStart > 0) {
-          args.push("-ss", String(trimStart));
-        }
+          // Start args with -y so FFmpeg overwrites output files without prompting
+          let args = ["-y"];
 
-        args.push("-i", inputName);
-
-        if (trimEnd > 0) {
-          updateFileStatus(index, "Measuring duration…");
-          const duration = await getDurationSeconds(inputName);
-          if (duration && duration > trimEnd) {
-            const newDuration = duration - trimEnd;
-            args.push("-t", String(newDuration));
+          if (trimStart > 0) {
+            args.push("-ss", String(trimStart));
           }
+
+          args.push("-i", inputName);
+
+          if (trimEnd > 0) {
+            updateFileStatus(index, "Measuring duration…");
+            const duration = await getDurationSeconds(inputName);
+            if (duration && duration > trimEnd) {
+              const newDuration = duration - trimEnd;
+              args.push("-t", String(newDuration));
+            }
+          }
+
+          if (autoTrim) {
+            args.push(
+              "-af",
+              "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB:" +
+                "end_periods=1:end_duration=0.1:end_threshold=-50dB"
+            );
+          }
+
+          if (format === "mp3") {
+            args.push("-acodec", "libmp3lame", "-b:a", "192k");
+          }
+
+          args.push(outputName);
+
+          updateFileStatus(index, "Converting…");
+          await ffmpeg.run(...args);
+
+          updateFileStatus(index, "Reading…");
+          const data = ffmpeg.FS("readFile", outputName);
+          const blob = new Blob([data.buffer], {
+            type: format === "mp3" ? "audio/mpeg" : "audio/wav",
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = outputName;
+          a.click();
+          URL.revokeObjectURL(url);
+
+          updateFileStatus(index, "Done");
+        } catch (err) {
+          // More helpful error logging
+          console.error("FFmpeg error for file", file.name, err);
+          updateFileStatus(index, "Error");
+          errorLogEl.textContent += `File ${file.name} error:\n${
+            err?.message || err?.toString() || String(err)
+          }\n\n`;
+          errorLogEl.style.display = "block";
+          throw err;
+        } finally {
+          // Cleanup FS to keep memory under control
+          try { ffmpeg.FS("unlink", inputName); } catch (e) {}
+          try { ffmpeg.FS("unlink", outputName); } catch (e) {}
         }
-
-        if (autoTrim) {
-          args.push(
-            "-af",
-            "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB:" +
-              "end_periods=1:end_duration=0.1:end_threshold=-50dB"
-          );
-        }
-
-        if (format === "mp3") {
-          args.push("-acodec", "libmp3lame", "-b:a", "192k");
-        }
-
-        args.push(outputName);
-
-        updateFileStatus(index, "Converting…");
-        await ffmpeg.run(...args);
-
-        updateFileStatus(index, "Reading…");
-        const data = ffmpeg.FS("readFile", outputName);
-        const blob = new Blob([data.buffer], {
-          type: format === "mp3" ? "audio/mpeg" : "audio/wav",
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = outputName;
-        a.click();
-        URL.revokeObjectURL(url);
-
-        updateFileStatus(index, "Done");
       }
 
       // --- Batch conversion ---
+      let isConverting = false;
+      
       convertBtn.addEventListener("click", async () => {
+        if (isConverting) {
+          alert("Conversion is already running.");
+          return;
+        }
         if (!ffmpegLoaded) {
           alert("FFmpeg core is still loading. Please wait a moment and try again.");
           return;
@@ -715,42 +741,44 @@
           return;
         }
 
-        const format = formatSelect.value;
-        const trimStart = Number(trimStartEl.value || 0);
-        const trimEnd = Number(trimEndEl.value || 0);
-        const autoTrim = autoTrimEl.checked;
-
-        statusEl.textContent = "Starting batch conversion…";
-        errorLogEl.style.display = "none";
-        errorLogEl.textContent = "";
-
-        const total = selectedFiles.length;
-        let processed = 0;
-        updateBatchProgress(0, total);
+        isConverting = true;
         convertBtn.disabled = true;
 
-        for (let i = 0; i < selectedFiles.length; i++) {
-          try {
-            await convertSingleFile(selectedFiles[i], i, {
-              format,
-              trimStart,
-              trimEnd,
-              autoTrim,
-            });
-            processed++;
-            updateBatchProgress(processed, total);
-            statusEl.textContent = `Converted ${processed} of ${total}.`;
-          } catch (err) {
-            updateFileStatus(i, "Error");
-            errorLogEl.textContent += `File ${selectedFiles[i].name} error:\n${String(
-              err
-            )}\n\n`;
-            errorLogEl.style.display = "block";
-          }
-        }
+        try {
+          const format = formatSelect.value;
+          const trimStart = Number(trimStartEl.value || 0);
+          const trimEnd = Number(trimEndEl.value || 0);
+          const autoTrim = autoTrimEl.checked;
 
-        convertBtn.disabled = false;
-        statusEl.textContent = "Batch conversion complete.";
+          statusEl.textContent = "Starting batch conversion…";
+          errorLogEl.style.display = "none";
+          errorLogEl.textContent = "";
+
+          const total = selectedFiles.length;
+          let processed = 0;
+          updateBatchProgress(0, total);
+
+          for (let i = 0; i < selectedFiles.length; i++) {
+            try {
+              await convertSingleFile(selectedFiles[i], i, {
+                format,
+                trimStart,
+                trimEnd,
+                autoTrim,
+              });
+              processed++;
+              updateBatchProgress(processed, total);
+              statusEl.textContent = `Converted ${processed} of ${total}.`;
+            } catch (err) {
+              // already logged per-file, continue with next file
+            }
+          }
+
+          statusEl.textContent = "Batch conversion complete.";
+        } finally {
+          isConverting = false;
+          convertBtn.disabled = false;
+        }
       });
     });
   </script>
