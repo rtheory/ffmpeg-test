@@ -684,7 +684,15 @@
           const data = ffmpeg.FS("readFile", outputName);
           ffmpegProgressEl.value = 90;
 
-          const blob = new Blob([data.buffer], {
+          // If FFmpeg produced no data (possible when silence-trim removed all audio
+          // or an internal error occurred), avoid creating a 0-byte download and
+          // surface a helpful error message instead.
+          if (!data || data.length === 0) {
+            throw new Error("FFmpeg produced an empty output file. The file may have been fully trimmed or conversion failed.");
+          }
+
+          // Create Blob directly from the Uint8Array returned by FFmpeg.FS
+          const blob = new Blob([data], {
             type: format === "mp3" ? "audio/mpeg" : "audio/wav",
           });
           const url = URL.createObjectURL(blob);
