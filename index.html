@@ -301,14 +301,17 @@
       <p class="subtitle">Drop in audio files, preview the waveform, trim, and convert to WAV or MP3.</p>
     </div>
 
+    <!-- Drag & Drop -->
     <div id="dragZone" class="drag-zone">
       <div class="drag-zone-title">Drop audio files here</div>
       <div class="drag-zone-sub">or click to browse</div>
     </div>
     <input type="file" id="fileInput" accept="audio/*" multiple />
 
+    <!-- File list -->
     <div class="file-list" id="fileList"></div>
 
+    <!-- Waveform + timeline + controls -->
     <div class="waveform-container">
       <div id="waveform"></div>
       <div id="waveTimeline"></div>
@@ -319,6 +322,7 @@
       </div>
     </div>
 
+    <!-- Options -->
     <div>
       <label>Convert to format</label>
       <select id="formatSelect">
@@ -345,10 +349,11 @@
 
     <button id="convertBtn">Convert all files</button>
 
+    <!-- Progress -->
     <div class="progress-row">
       <div class="progress-label">
         <span>FFmpeg Core</span>
-        <span id="ffmpegLoadLabel">Loading…</span>
+        <span id="ffmpegLoadLabel">Idle</span>
       </div>
       <progress id="ffmpegProgress" max="100" value="0"></progress>
     </div>
@@ -361,12 +366,14 @@
       <progress id="overallProgress" max="100" value="0"></progress>
     </div>
 
-    <div id="status">Initializing FFmpeg…</div>
+    <div id="status">Ready. Add audio files to begin.</div>
     <pre id="error-log"></pre>
   </div>
 
+  <!-- WaveSurfer -->
   <script src="./wavesurfer.min.js"></script>
   <script src="./wavesurfer.timeline.min.js"></script>
+  <!-- ffmpeg.wasm wrapper -->
   <script src="./ffmpeg.min.js"></script>
 
   <script>
@@ -391,10 +398,12 @@
 
       let selectedFiles = [];
       let activeIndex = -1;
-      let ffmpegLoaded = false;
       let currentObjectUrl = null;
       let isConverting = false;
 
+      const corePath = new URL("./ffmpeg-core.js", window.location.href).href;
+
+      // Helper: format seconds → mm:ss
       function formatTime(seconds) {
         if (!Number.isFinite(seconds)) seconds = 0;
         const m = Math.floor(seconds / 60);
@@ -402,7 +411,7 @@
         return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
       }
 
-      // WaveSurfer setup
+      // --- WaveSurfer setup ---
       const wavesurfer = WaveSurfer.create({
         container: "#waveform",
         waveColor: "#cbd5f5",
@@ -465,48 +474,7 @@
         waveTimeEl.textContent = "00:00 / 00:00";
       }
 
-      // FFmpeg setup
-      const { createFFmpeg, fetchFile } = FFmpeg;
-      const corePath = new URL("./ffmpeg-core.js", window.location.href).href;
-
-      const ffmpeg = createFFmpeg({
-        log: false,
-        mainName: "main",
-        corePath,
-      });
-
-      async function runFFmpegSafe(...args) {
-        try {
-          return await ffmpeg.run(...args);
-        } catch (err) {
-          // Some builds throw ExitStatus(0) – treat that as success
-          if (err && err.name === "ExitStatus" && (err.status === 0 || err.status === "0")) {
-            console.warn("FFmpeg exited with status 0 but threw ExitStatus – treating as success.", err);
-            return;
-          }
-          throw err;
-        }
-      }
-
-      (async () => {
-        try {
-          statusEl.textContent = "Loading FFmpeg core…";
-          ffmpegProgressEl.value = 10;
-          await ffmpeg.load();
-          ffmpegLoaded = true;
-          ffmpegProgressEl.value = 100;
-          ffmpegLoadLabelEl.textContent = "Loaded";
-          statusEl.textContent = "FFmpeg ready.";
-        } catch (err) {
-          ffmpegProgressEl.value = 0;
-          ffmpegLoadLabelEl.textContent = "Error";
-          statusEl.textContent = "Failed to load FFmpeg.";
-          errorLogEl.textContent = String(err);
-          errorLogEl.style.display = "block";
-        }
-      })();
-
-      // Duration via browser Audio (no extra ffmpeg commands)
+      // --- Duration helper via browser Audio (no extra ffmpeg.run) ---
       function getDurationSecondsFromFile(file) {
         return new Promise((resolve) => {
           const url = URL.createObjectURL(file);
@@ -538,7 +506,7 @@
         });
       }
 
-      // File handling
+      // --- File selection / drag-drop ---
       function handleFiles(files) {
         const newFiles = Array.from(files).filter(f => f.type.startsWith("audio/") || !f.type);
         if (!newFiles.length) return;
@@ -577,7 +545,7 @@
         fileInput.value = "";
       });
 
-      // File list UI
+      // --- File list UI ---
       function renderFileList() {
         fileListEl.innerHTML = "";
         if (!selectedFiles.length) {
@@ -628,9 +596,10 @@
         overallProgressEl.value = processed;
       }
 
-      // Single file conversion
+      // --- Single file conversion (new ffmpeg instance per file) ---
       async function convertSingleFile(file, index, options) {
         const { format, trimStart, trimEnd, autoTrim } = options;
+        const { createFFmpeg, fetchFile } = FFmpeg;
 
         const ext = file.name.includes(".")
           ? file.name.split(".").pop()
@@ -639,13 +608,42 @@
         const inputName = `input_${index}.${ext}`;
         const outputName = `${baseName}_converted.${format}`;
 
+        ffmpegLoadLabelEl.textContent = "Loading…";
+        ffmpegProgressEl.value = 10;
+
+        // New ffmpeg instance for THIS file
+        const ffmpeg = createFFmpeg({
+          log: false,
+          mainName: "main",
+          corePath,
+        });
+
+        // Helper wrapper for this instance
+        async function runFFmpegSafe(...args) {
+          try {
+            return await ffmpeg.run(...args);
+          } catch (err) {
+            if (err && err.name === "ExitStatus" && (err.status === 0 || err.status === "0")) {
+              console.warn("FFmpeg exited with status 0 but threw ExitStatus – treating as success.", err);
+              return;
+            }
+            throw err;
+          }
+        }
+
         try {
-          // Clean up previous runs
+          updateFileStatus(index, "Loading core…");
+          await ffmpeg.load();
+          ffmpegProgressEl.value = 40;
+          ffmpegLoadLabelEl.textContent = "Core loaded";
+
+          // Clean up previous runs in this instance (should be none, but safe)
           try { ffmpeg.FS("unlink", inputName); } catch (e) {}
           try { ffmpeg.FS("unlink", outputName); } catch (e) {}
 
           updateFileStatus(index, "Writing…");
           ffmpeg.FS("writeFile", inputName, await fetchFile(file));
+          ffmpegProgressEl.value = 60;
 
           let args = ["-y"]; // overwrite output
 
@@ -679,10 +677,13 @@
           args.push(outputName);
 
           updateFileStatus(index, "Converting…");
+          ffmpegProgressEl.value = 80;
           await runFFmpegSafe(...args);
 
           updateFileStatus(index, "Reading…");
           const data = ffmpeg.FS("readFile", outputName);
+          ffmpegProgressEl.value = 90;
+
           const blob = new Blob([data.buffer], {
             type: format === "mp3" ? "audio/mpeg" : "audio/wav",
           });
@@ -693,6 +694,7 @@
           a.click();
           URL.revokeObjectURL(url);
 
+          ffmpegProgressEl.value = 100;
           updateFileStatus(index, "Done");
         } catch (err) {
           console.error("FFmpeg error for file", file.name, err);
@@ -705,17 +707,16 @@
         } finally {
           try { ffmpeg.FS("unlink", inputName); } catch (e) {}
           try { ffmpeg.FS("unlink", outputName); } catch (e) {}
+          try { ffmpeg.exit && ffmpeg.exit(); } catch (e) {}
+          ffmpegLoadLabelEl.textContent = "Idle";
+          ffmpegProgressEl.value = 0;
         }
       }
 
-      // Batch conversion
+      // --- Batch conversion ---
       convertBtn.addEventListener("click", async () => {
         if (isConverting) {
           alert("Conversion is already running.");
-          return;
-        }
-        if (!ffmpegLoaded) {
-          alert("FFmpeg core is still loading. Please wait a moment and try again.");
           return;
         }
         if (!selectedFiles.length) {
@@ -752,7 +753,7 @@
               updateBatchProgress(processed, total);
               statusEl.textContent = `Converted ${processed} of ${total}.`;
             } catch (err) {
-              // error already logged per file
+              // per-file error already logged; continue to next file
             }
           }
 
