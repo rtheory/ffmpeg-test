@@ -447,49 +447,68 @@
       }
 
       // --- WaveSurfer setup ---
-      const wavesurfer = WaveSurfer.create({
-        container: "#waveform",
-        waveColor: "#cbd5f5",
-        progressColor: "#2563eb",
-        cursorColor: "#2563eb",
-        height: 96,
-        responsive: true,
-      });
+      let wavesurfer;
 
-      if (WaveSurfer.Timeline) {
-        wavesurfer.registerPlugin(
-          WaveSurfer.Timeline.create({
-            container: "#waveTimeline",
-            height: 18,
-            timeInterval: 1,
-            primaryLabelInterval: 5,
-            secondaryLabelInterval: 1,
-            style: { fontSize: "10px", color: "#6b7280" },
-            formatTimeCallback: (sec) => formatTime(sec),
-          })
-        );
+      function initWaveSurfer() {
+        // Destroy existing instance if any
+        try { if (wavesurfer && typeof wavesurfer.destroy === 'function') wavesurfer.destroy(); } catch (e) {}
+
+        wavesurfer = WaveSurfer.create({
+          container: "#waveform",
+          waveColor: "#cbd5f5",
+          progressColor: "#2563eb",
+          cursorColor: "#2563eb",
+          height: 96,
+          responsive: true,
+        });
+
+        if (WaveSurfer.Timeline) {
+          try {
+            wavesurfer.registerPlugin(
+              WaveSurfer.Timeline.create({
+                container: "#waveTimeline",
+                height: 18,
+                timeInterval: 1,
+                primaryLabelInterval: 5,
+                secondaryLabelInterval: 1,
+                style: { fontSize: "10px", color: "#6b7280" },
+                formatTimeCallback: (sec) => formatTime(sec),
+              })
+            );
+          } catch (e) { console.warn('Timeline plugin registration failed', e); }
+        }
+
+        wavesurfer.on("ready", () => {
+          playPauseBtn.disabled = false;
+          const duration = wavesurfer.getDuration() || 0;
+          waveTimeEl.textContent = `00:00 / ${formatTime(duration)}`;
+        });
+
+        wavesurfer.on("timeupdate", (currentTime) => {
+          const duration = wavesurfer.getDuration() || 0;
+          waveTimeEl.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+        });
+
+        wavesurfer.on("finish", () => {
+          playPauseBtn.textContent = "Play";
+        });
+
+        // Use onclick to avoid adding multiple handlers when re-initializing
+        playPauseBtn.onclick = () => {
+          if (!wavesurfer) return;
+          wavesurfer.playPause();
+          playPauseBtn.textContent = wavesurfer.isPlaying() ? "Pause" : "Play";
+        };
       }
 
-      wavesurfer.on("ready", () => {
-        playPauseBtn.disabled = false;
-        const duration = wavesurfer.getDuration() || 0;
-        waveTimeEl.textContent = `00:00 / ${formatTime(duration)}`;
-      });
+      function resetWaveSurfer() {
+        try { if (wavesurfer) wavesurfer.stop(); } catch (e) {}
+        try { if (wavesurfer) wavesurfer.destroy(); } catch (e) {}
+        initWaveSurfer();
+      }
 
-      wavesurfer.on("timeupdate", (currentTime) => {
-        const duration = wavesurfer.getDuration() || 0;
-        waveTimeEl.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
-      });
-
-      wavesurfer.on("finish", () => {
-        playPauseBtn.textContent = "Play";
-      });
-
-      playPauseBtn.addEventListener("click", () => {
-        if (!wavesurfer) return;
-        wavesurfer.playPause();
-        playPauseBtn.textContent = wavesurfer.isPlaying() ? "Pause" : "Play";
-      });
+      // initialize
+      initWaveSurfer();
 
       function loadWaveformForIndex(index) {
         const file = selectedFiles[index];
@@ -639,7 +658,8 @@
 
         if (selectedFiles.length === 0) {
           activeIndex = -1;
-          try { wavesurfer.empty(); } catch (e) {}
+          // Fully reset WaveSurfer to ensure no audio remains playable
+          try { resetWaveSurfer(); } catch (e) { try { wavesurfer.empty(); } catch (e) {} }
           waveInfoEl.textContent = "No file selected.";
           waveTimeEl.textContent = "00:00 / 00:00";
           playPauseBtn.disabled = true;
