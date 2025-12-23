@@ -567,13 +567,61 @@
           statusSpan.id = `fileStatus-${idx}`;
           statusSpan.textContent = "Pending";
 
+          // Delete button for removing uploaded file
+          const delBtn = document.createElement("button");
+          delBtn.className = "secondary";
+          delBtn.style.padding = "0.2rem 0.45rem";
+          delBtn.style.fontSize = "0.75rem";
+          delBtn.textContent = "Delete";
+          delBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            removeFileAt(idx);
+          });
+
           item.appendChild(nameSpan);
           item.appendChild(statusSpan);
+          item.appendChild(delBtn);
 
           item.addEventListener("click", () => loadWaveformForIndex(idx));
 
           fileListEl.appendChild(item);
         });
+      }
+
+      // Remove a file from the selectedFiles list and update UI/state
+      function removeFileAt(index) {
+        if (index < 0 || index >= selectedFiles.length) return;
+        // Remove the file
+        selectedFiles.splice(index, 1);
+
+        // Adjust activeIndex and waveform
+        if (currentObjectUrl) {
+          try { URL.revokeObjectURL(currentObjectUrl); } catch (e) {}
+          currentObjectUrl = null;
+        }
+
+        if (selectedFiles.length === 0) {
+          activeIndex = -1;
+          try { wavesurfer.empty(); } catch (e) {}
+          waveInfoEl.textContent = "No file selected.";
+          waveTimeEl.textContent = "00:00 / 00:00";
+          playPauseBtn.disabled = true;
+        } else {
+          // If we removed the currently active file, load the next sensible one
+          if (index === activeIndex) {
+            const newIndex = Math.min(index, selectedFiles.length - 1);
+            loadWaveformForIndex(newIndex);
+          } else if (index < activeIndex) {
+            // Shift active index down if an earlier file was removed
+            activeIndex = Math.max(0, activeIndex - 1);
+            updateFileListUI();
+          } else {
+            updateFileListUI();
+          }
+        }
+
+        renderFileList();
+        updateBatchProgress(0, selectedFiles.length);
       }
 
       function updateFileStatus(index, text) {
@@ -611,11 +659,15 @@
         ffmpegLoadLabelEl.textContent = "Loading…";
         ffmpegProgressEl.value = 10;
 
-        // New ffmpeg instance for THIS file
+        // New ffmpeg instance for THIS file. Capture logs for silencedetect parsing.
+        const logLines = [];
         const ffmpeg = createFFmpeg({
-          log: false,
+          log: true,
           mainName: "main",
           corePath,
+          logger: ({ type, message }) => {
+            if (message) logLines.push(String(message));
+          },
         });
 
         // Helper wrapper for this instance
@@ -645,29 +697,71 @@
           ffmpeg.FS("writeFile", inputName, await fetchFile(file));
           ffmpegProgressEl.value = 60;
 
-          let args = ["-y"]; // overwrite output
+          let args = ["-y"];
 
-          if (trimStart > 0) {
-            args.push("-ss", String(trimStart));
+          // Determine duration if needed (manual trimEnd or autoTrim detection)
+          let duration = null;
+          if (trimEnd > 0 || autoTrim) {
+            updateFileStatus(index, "Measuring duration…");
+            duration = await getDurationSecondsFromFile(file);
+          }
+
+          // If autoTrim is requested, run silencedetect to find leading/trailing silence
+          let autoTrimStart = null;
+          let autoTrimEnd = null;
+          if (autoTrim) {
+            updateFileStatus(index, "Detecting silence…");
+            // Run silencedetect to collect silence_start / silence_end messages
+            try {
+              // clear any previous logs
+              logLines.length = 0;
+              await runFFmpegSafe("-i", inputName, "-af", "silencedetect=n=-50dB:d=0.1", "-f", "null", "-");
+
+              const silenceStarts = [];
+              const silenceEnds = [];
+              for (const line of logLines) {
+                const mStart = line.match(/silence_start: ([0-9.]+)/);
+                if (mStart) silenceStarts.push(Number(mStart[1]));
+                const mEnd = line.match(/silence_end: ([0-9.]+)/);
+                if (mEnd) silenceEnds.push(Number(mEnd[1]));
+              }
+
+              // Leading silence: use first silence_end if present
+              if (silenceEnds.length > 0) {
+                autoTrimStart = silenceEnds[0];
+              }
+
+              // Trailing silence: use last silence_start if present and we know duration
+              if (silenceStarts.length > 0 && duration) {
+                const lastStart = silenceStarts[silenceStarts.length - 1];
+                if (lastStart > 0 && duration > lastStart) {
+                  autoTrimEnd = Math.max(0, duration - lastStart);
+                }
+              }
+            } catch (e) {
+              // If silencedetect run fails for any reason, continue without autoTrim
+              console.warn("silencedetect failed, skipping auto trim:", e);
+            }
+          }
+
+          // Apply start trim: prioritize explicit user-provided `trimStart` if >0,
+          // otherwise use detected `autoTrimStart` when available.
+          const effectiveTrimStart = (trimStart > 0) ? trimStart : (autoTrimStart || 0);
+          if (effectiveTrimStart > 0) {
+            args.push("-ss", String(effectiveTrimStart));
           }
 
           args.push("-i", inputName);
 
-          if (trimEnd > 0) {
-            updateFileStatus(index, "Measuring duration…");
-            const duration = await getDurationSecondsFromFile(file);
-            if (duration && duration > trimEnd) {
-              const newDuration = duration - trimEnd;
-              args.push("-t", String(newDuration));
-            }
+          // Apply end trim: prioritize explicit `trimEnd` if provided, otherwise use detected autoTrimEnd
+          let effectiveDuration = null;
+          if (trimEnd > 0 && duration && duration > trimEnd) {
+            effectiveDuration = duration - trimEnd;
+          } else if (autoTrimEnd != null && duration && duration > autoTrimEnd) {
+            effectiveDuration = duration - autoTrimEnd;
           }
-
-          if (autoTrim) {
-            args.push(
-              "-af",
-              "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB:" +
-              "end_periods=1:end_duration=0.1:end_threshold=-50dB"
-            );
+          if (effectiveDuration != null) {
+            args.push("-t", String(effectiveDuration));
           }
 
           if (format === "mp3") {
