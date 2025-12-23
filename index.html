@@ -295,7 +295,7 @@
   </style>
     <style>
       /* Status indicator styles */
-      .status-row { margin-top: 0.5rem; }
+      .status-row { margin-top: 0.5rem; display:flex; justify-content:center; }
       .status-indicator { display:flex; align-items:center; gap:0.6rem; }
       .status-icon { width:18px; height:18px; border-radius:50%; position:relative; }
       .status-icon.idle { background:#e5e7eb; }
@@ -372,7 +372,7 @@
       </div>
     </div>
 
-    <div id="status">Ready. Add audio files to begin.</div>
+    <!-- textual status removed; use centered status indicator above -->
     <pre id="error-log"></pre>
   </div>
 
@@ -384,7 +384,7 @@
 
   <script>
     document.addEventListener("DOMContentLoaded", () => {
-      const statusEl = document.getElementById("status");
+      // textual `#status` removed; statusTextEl displays status now
       const errorLogEl = document.getElementById("error-log");
       const dragZone = document.getElementById("dragZone");
       const fileInput = document.getElementById("fileInput");
@@ -670,8 +670,14 @@
       }
 
       function updateBatchProgress(processed, total) {
+        // Only show converting state when actual work has started (processed > 0).
+        // When files are merely queued (processed === 0), show an idle queued state.
         if (!total || total <= 0) {
           setStatusIdle();
+          return;
+        }
+        if (processed === 0) {
+          setStatusIdle(`${total} file${total>1?"s":""} queued`);
           return;
         }
         if (processed >= total) {
@@ -865,7 +871,7 @@
         const trimEnd = Number(trimEndEl.value || 0);
         const autoTrim = autoTrimEl.checked;
 
-        statusEl.textContent = "Starting batch conversion…";
+        setStatusWorking("Starting batch conversion…");
         errorLogEl.style.display = "none";
         errorLogEl.textContent = "";
 
@@ -887,13 +893,13 @@
               });
               processed++;
               updateBatchProgress(processed, total);
-              statusEl.textContent = `Converted ${processed} of ${total}.`;
+              setStatusWorking(`Converted ${processed} of ${total}.`);
             } catch (err) {
               // per-file error already logged; continue to next file
             }
           }
 
-          statusEl.textContent = "Batch conversion complete.";
+          setStatusComplete("Batch conversion complete.");
         } finally {
           convertBtn.disabled = false;
           isConverting = false;
