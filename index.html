@@ -594,7 +594,9 @@
         // Remove the file
         selectedFiles.splice(index, 1);
 
-        // Adjust activeIndex and waveform
+        // Stop playback and adjust activeIndex and waveform
+        try { wavesurfer.stop(); } catch (e) {}
+
         if (currentObjectUrl) {
           try { URL.revokeObjectURL(currentObjectUrl); } catch (e) {}
           currentObjectUrl = null;
@@ -606,6 +608,7 @@
           waveInfoEl.textContent = "No file selected.";
           waveTimeEl.textContent = "00:00 / 00:00";
           playPauseBtn.disabled = true;
+          playPauseBtn.textContent = "Play";
         } else {
           // If we removed the currently active file, load the next sensible one
           if (index === activeIndex) {
