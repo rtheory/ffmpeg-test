@@ -293,6 +293,21 @@
       justify-content: space-between;
     }
   </style>
+    <style>
+      /* Status indicator styles */
+      .status-row { margin-top: 0.5rem; }
+      .status-indicator { display:flex; align-items:center; gap:0.6rem; }
+      .status-icon { width:18px; height:18px; border-radius:50%; position:relative; }
+      .status-icon.idle { background:#e5e7eb; }
+      .status-icon.working { background:transparent; }
+      .status-icon.working::before {
+        content: ""; box-sizing:border-box; position:absolute; inset:0; border-radius:50%;
+        border:3px solid rgba(37,99,235,0.15); border-top-color: #2563eb; animation:spin 1s linear infinite;
+      }
+      .status-icon.complete { background:#16a34a; box-shadow:0 0 0 4px rgba(16,185,129,0.08) inset; }
+      .status-text { color:#374151; font-weight:600; font-size:0.9rem; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
 </head>
 <body>
   <div class="card">
@@ -349,21 +364,12 @@
 
     <button id="convertBtn">Convert all files</button>
 
-    <!-- Progress -->
-    <div class="progress-row">
-      <div class="progress-label">
-        <span>FFmpeg Core</span>
-        <span id="ffmpegLoadLabel">Idle</span>
+    <!-- Status indicator (replaces progress bars) -->
+    <div class="status-row">
+      <div id="statusIndicator" class="status-indicator">
+        <div id="statusIcon" class="status-icon idle" aria-hidden="true"></div>
+        <div id="statusText" class="status-text">Ready. Add audio files to begin.</div>
       </div>
-      <progress id="ffmpegProgress" max="100" value="0"></progress>
-    </div>
-
-    <div class="progress-row">
-      <div class="progress-label">
-        <span>Batch progress</span>
-        <span id="batchLabel">0 / 0</span>
-      </div>
-      <progress id="overallProgress" max="100" value="0"></progress>
     </div>
 
     <div id="status">Ready. Add audio files to begin.</div>
@@ -388,10 +394,9 @@
       const trimEndEl = document.getElementById("trimEnd");
       const autoTrimEl = document.getElementById("autoTrim");
       const convertBtn = document.getElementById("convertBtn");
-      const ffmpegProgressEl = document.getElementById("ffmpegProgress");
-      const ffmpegLoadLabelEl = document.getElementById("ffmpegLoadLabel");
-      const overallProgressEl = document.getElementById("overallProgress");
-      const batchLabelEl = document.getElementById("batchLabel");
+      const statusIndicatorEl = document.getElementById("statusIndicator");
+      const statusIconEl = document.getElementById("statusIcon");
+      const statusTextEl = document.getElementById("statusText");
       const playPauseBtn = document.getElementById("playPauseBtn");
       const waveInfoEl = document.getElementById("waveInfo");
       const waveTimeEl = document.getElementById("waveTime");
@@ -409,6 +414,29 @@
         const m = Math.floor(seconds / 60);
         const s = Math.floor(seconds % 60);
         return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+      }
+
+      // Status helpers (replace progress bars)
+      function setStatusWorking(message, percent) {
+        try {
+          statusIconEl.className = "status-icon working";
+        } catch (e) {}
+        if (message) statusTextEl.textContent = message + (percent ? ` (${percent}%)` : "");
+      }
+
+      function setStatusIdle(message) {
+        try { statusIconEl.className = "status-icon idle"; } catch (e) {}
+        statusTextEl.textContent = message || "Ready. Add audio files to begin.";
+      }
+
+      function setStatusComplete(message) {
+        try { statusIconEl.className = "status-icon complete"; } catch (e) {}
+        statusTextEl.textContent = message || "Complete";
+      }
+
+      function setStatusError(message) {
+        try { statusIconEl.className = "status-icon idle"; } catch (e) {}
+        statusTextEl.textContent = message || "Error";
       }
 
       // --- WaveSurfer setup ---
@@ -642,9 +670,15 @@
       }
 
       function updateBatchProgress(processed, total) {
-        batchLabelEl.textContent = `${processed} / ${total}`;
-        overallProgressEl.max = total || 1;
-        overallProgressEl.value = processed;
+        if (!total || total <= 0) {
+          setStatusIdle();
+          return;
+        }
+        if (processed >= total) {
+          setStatusComplete(`Batch complete — ${total} file${total>1?"s":""}`);
+        } else {
+          setStatusWorking(`Converting ${processed} / ${total}`);
+        }
       }
 
       // --- Single file conversion (new ffmpeg instance per file) ---
@@ -659,8 +693,7 @@
         const inputName = `input_${index}.${ext}`;
         const outputName = `${baseName}_converted.${format}`;
 
-        ffmpegLoadLabelEl.textContent = "Loading…";
-        ffmpegProgressEl.value = 10;
+        setStatusWorking("Loading…", 10);
 
         // New ffmpeg instance for THIS file. Capture logs for silencedetect parsing.
         const logLines = [];
@@ -689,8 +722,7 @@
         try {
           updateFileStatus(index, "Loading core…");
           await ffmpeg.load();
-          ffmpegProgressEl.value = 40;
-          ffmpegLoadLabelEl.textContent = "Core loaded";
+          setStatusWorking("Core loaded", 40);
 
           // Clean up previous runs in this instance (should be none, but safe)
           try { ffmpeg.FS("unlink", inputName); } catch (e) {}
@@ -698,7 +730,7 @@
 
           updateFileStatus(index, "Writing…");
           ffmpeg.FS("writeFile", inputName, await fetchFile(file));
-          ffmpegProgressEl.value = 60;
+          setStatusWorking("Writing…", 60);
 
           let args = ["-y"];
 
@@ -774,12 +806,12 @@
           args.push(outputName);
 
           updateFileStatus(index, "Converting…");
-          ffmpegProgressEl.value = 80;
+          setStatusWorking("Converting…", 80);
           await runFFmpegSafe(...args);
 
           updateFileStatus(index, "Reading…");
           const data = ffmpeg.FS("readFile", outputName);
-          ffmpegProgressEl.value = 90;
+          setStatusWorking("Reading…", 90);
 
           // If FFmpeg produced no data (possible when silence-trim removed all audio
           // or an internal error occurred), avoid creating a 0-byte download and
@@ -799,7 +831,7 @@
           a.click();
           URL.revokeObjectURL(url);
 
-          ffmpegProgressEl.value = 100;
+          setStatusComplete("Done");
           updateFileStatus(index, "Done");
         } catch (err) {
           console.error("FFmpeg error for file", file.name, err);
@@ -813,8 +845,7 @@
           try { ffmpeg.FS("unlink", inputName); } catch (e) {}
           try { ffmpeg.FS("unlink", outputName); } catch (e) {}
           try { ffmpeg.exit && ffmpeg.exit(); } catch (e) {}
-          ffmpegLoadLabelEl.textContent = "Idle";
-          ffmpegProgressEl.value = 0;
+          setStatusIdle();
         }
       }
 
