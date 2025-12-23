@@ -183,10 +183,10 @@
     }
 
     .file-empty {
-      padding: 0.6rem 0.45rem;
+      padding: 0.2rem 0.45rem;
       color: #9ca3af;
       text-align: center;
-      opacity: 0.85;
+      opacity: 0.65;
       font-size: 0.9rem;
     }
 
@@ -381,7 +381,7 @@
         <input type="number" id="trimEnd" min="0" placeholder="0" />
       </div>
       <div class="auto-col">
-        <label>Other Options</label>
+        <label>&nbsp;</label>
         <div class="auto-inner">
           <label class="checkbox-row" style="margin:0;">
             <input type="checkbox" id="autoTrim" />
@@ -627,7 +627,7 @@
       function renderFileList() {
         fileListEl.innerHTML = "";
         if (!selectedFiles.length) {
-          fileListEl.innerHTML = '<div class="file-empty">No files selected.</div>';
+          fileListEl.innerHTML = '<div class="file-empty">No files uploaded.</div>';
           return;
         }
 
