@@ -292,12 +292,22 @@
       display: flex;
       justify-content: space-between;
     }
-    /* Three-column trim row styles */
+    /* Three-column trim row styles (kept for backward compatibility) */
     .row.three-cols { display:flex; gap:0.75rem; align-items:center; }
-    .row.three-cols .trim-col { flex: 0 0 120px; }
+    .row.three-cols .trim-col { flex: 0 0 120px; display:flex; flex-direction:column; justify-content:center; }
+    .row.three-cols .trim-col label { margin-bottom:0.25rem; }
+    .row.three-cols .trim-col input[type="number"] { height:36px; padding:0.35rem 0.5rem; }
     .row.three-cols .auto-col { flex: 1; display:flex; align-items:center; }
-    .row.three-cols .auto-col .checkbox-row { margin: 0; display:flex; align-items:center; gap:0.4rem; }
+    .row.three-cols .auto-col .checkbox-row { margin: 0; display:flex; align-items:center; gap:0.4rem; height:100%; }
     .row.three-cols input[type="checkbox"] { vertical-align: middle; transform: translateY(0); }
+
+    /* Four-column layout: format + two trims + auto-trim */
+    .row.four-cols { display:flex; gap:0.75rem; align-items:center; }
+    .row.four-cols .format-col { flex: 0 0 150px; display:flex; flex-direction:column; justify-content:center; }
+    .row.four-cols .format-col select { height:36px; padding:0.35rem 0.5rem; }
+    .row.four-cols .trim-col { flex: 0 0 110px; display:flex; flex-direction:column; justify-content:center; }
+    .row.four-cols .auto-col { flex: 1; display:flex; align-items:center; }
+    .row.four-cols .auto-col .checkbox-row { margin: 0; display:flex; align-items:center; gap:0.4rem; }
   </style>
     <style>
       /* Status indicator styles */
@@ -343,16 +353,15 @@
       </div>
     </div>
 
-    <!-- Options -->
-    <div>
-      <label>Convert to format</label>
-      <select id="formatSelect">
-        <option value="mp3">MP3</option>
-        <option value="wav">WAV</option>
-      </select>
-    </div>
-
-    <div class="row three-cols">
+    <!-- Options (4-column): Format | Trim start | Trim end | Auto-Trim -->
+    <div class="row four-cols">
+      <div class="format-col">
+        <label>Convert to format</label>
+        <select id="formatSelect">
+          <option value="mp3">MP3</option>
+          <option value="wav">WAV</option>
+        </select>
+      </div>
       <div class="trim-col">
         <label>Trim start (sec)</label>
         <input type="number" id="trimStart" min="0" placeholder="0" />
