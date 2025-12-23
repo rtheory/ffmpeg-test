@@ -182,6 +182,14 @@
       font-size: 0.8rem;
     }
 
+    .file-empty {
+      padding: 0.6rem 0.45rem;
+      color: #9ca3af;
+      text-align: center;
+      opacity: 0.85;
+      font-size: 0.9rem;
+    }
+
     .file-item {
       padding: 0.3rem 0.45rem;
       border-radius: 6px;
@@ -523,6 +531,8 @@
 
       // initialize
       initWaveSurfer();
+      // ensure file list shows placeholder on page load
+      renderFileList();
 
       function loadWaveformForIndex(index) {
         const file = selectedFiles[index];
@@ -617,7 +627,7 @@
       function renderFileList() {
         fileListEl.innerHTML = "";
         if (!selectedFiles.length) {
-          fileListEl.innerHTML = '<div style="padding:0.3rem 0.45rem;color:#9ca3af;">No files selected.</div>';
+          fileListEl.innerHTML = '<div class="file-empty">No files selected.</div>';
           return;
         }
 
