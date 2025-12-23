@@ -306,7 +306,9 @@
     .row.four-cols .format-col { flex: 0 0 150px; display:flex; flex-direction:column; justify-content:center; }
     .row.four-cols .format-col select { height:36px; padding:0.35rem 0.5rem; }
     .row.four-cols .trim-col { flex: 0 0 110px; display:flex; flex-direction:column; justify-content:center; }
-    .row.four-cols .auto-col { flex: 1; display:flex; align-items:center; }
+    .row.four-cols .auto-col { flex: 1; display:flex; flex-direction:column; justify-content:center; }
+    .row.four-cols .auto-col label { margin-bottom:0.25rem; }
+    .row.four-cols .auto-col .auto-inner { display:flex; align-items:center; }
     .row.four-cols .auto-col .checkbox-row { margin: 0; display:flex; align-items:center; gap:0.4rem; }
   </style>
     <style>
@@ -371,10 +373,13 @@
         <input type="number" id="trimEnd" min="0" placeholder="0" />
       </div>
       <div class="auto-col">
-        <label class="checkbox-row" style="margin:0;">
-          <input type="checkbox" id="autoTrim" />
-          Auto-Trim Silence
-        </label>
+        <label>Other Options</label>
+        <div class="auto-inner">
+          <label class="checkbox-row" style="margin:0;">
+            <input type="checkbox" id="autoTrim" />
+            Auto-Trim Silence
+          </label>
+        </div>
       </div>
     </div>
 
