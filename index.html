@@ -300,15 +300,6 @@
       display: flex;
       justify-content: space-between;
     }
-    /* Three-column trim row styles (kept for backward compatibility) */
-    .row.three-cols { display:flex; gap:0.75rem; align-items:center; }
-    .row.three-cols .trim-col { flex: 0 0 120px; display:flex; flex-direction:column; justify-content:center; }
-    .row.three-cols .trim-col label { margin-bottom:0.25rem; }
-    .row.three-cols .trim-col input[type="number"] { height:36px; padding:0.35rem 0.5rem; }
-    .row.three-cols .auto-col { flex: 1; display:flex; align-items:center; }
-    .row.three-cols .auto-col .checkbox-row { margin: 0; display:flex; align-items:center; gap:0.4rem; height:100%; }
-    .row.three-cols input[type="checkbox"] { vertical-align: middle; transform: translateY(0); }
-
     /* Four-column layout: format + two trims + auto-trim */
     .row.four-cols { display:flex; gap:0.75rem; align-items:center; }
     .row.four-cols .format-col { flex: 0 0 150px; display:flex; flex-direction:column; justify-content:center; }
@@ -408,12 +399,10 @@
   <!-- WaveSurfer -->
   <script src="./wavesurfer.min.js"></script>
   <script src="./wavesurfer.timeline.min.js"></script>
-  <!-- ffmpeg.wasm wrapper -->
   <script src="./ffmpeg.min.js"></script>
 
   <script>
     document.addEventListener("DOMContentLoaded", () => {
-      // textual `#status` removed; statusTextEl displays status now
       const errorLogEl = document.getElementById("error-log");
       const dragZone = document.getElementById("dragZone");
       const fileInput = document.getElementById("fileInput");
